@@ -1,5 +1,7 @@
 import { useState, useEffect } from "react";
 import * as XLSX from "xlsx";
+import jsPDF from "jspdf";
+import "jspdf-autotable";
 import initSqlJs from "sql.js";
 import { Button } from "@/components/ui/button";
 import { DatabaseIcon } from "lucide-react";
@@ -14,6 +16,17 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import { useToast } from "@/components/ui/use-toast";
 
 interface ExcelData {
@@ -24,7 +37,6 @@ interface ExcelData {
 
 interface CustomColumn {
   name: string;
-  formula: string;
 }
 
 export default function ExcelViewer() {
@@ -38,7 +50,7 @@ export default function ExcelViewer() {
   const [customColumns, setCustomColumns] = useState<CustomColumn[]>([]);
   const [showCustomColumnDialog, setShowCustomColumnDialog] = useState(false);
   const [newColumnName, setNewColumnName] = useState("");
-  const [newColumnFormula, setNewColumnFormula] = useState("");
+
   const [SQL, setSQL] = useState<any>(null);
 
   useEffect(() => {
@@ -94,30 +106,19 @@ export default function ExcelViewer() {
 
       // Drop and recreate table with current schema
       db.run(`DROP TABLE IF EXISTS ${excelData.tableName}`);
-      const allHeaders = [
-        ...excelData.headers,
-        ...customColumns.map((col) => col.name),
-      ];
-      const columns = allHeaders
+      const columns = excelData.headers
         .map((header) => `${header.replace(/\W/g, "_")} TEXT`)
         .join(", ");
 
       db.run(`CREATE TABLE ${excelData.tableName} (${columns})`);
 
-      // Insert all rows including custom columns
-      const placeholders = allHeaders.map(() => "?").join(", ");
+      // Insert all rows
+      const placeholders = excelData.headers.map(() => "?").join(", ");
       const stmt = db.prepare(
         `INSERT INTO ${excelData.tableName} VALUES (${placeholders})`,
       );
 
-      const allRows = excelData.rows.map((row) => {
-        const customValues = customColumns.map((col) =>
-          col.formula ? evaluateFormula(col.formula, row) : "",
-        );
-        return [...row, ...customValues];
-      });
-
-      allRows.forEach((row) => {
+      excelData.rows.forEach((row) => {
         stmt.run(row);
       });
 
@@ -213,47 +214,61 @@ export default function ExcelViewer() {
   };
 
   const totalPages = Math.ceil((excelData?.rows.length || 0) / rowsPerPage);
-  const evaluateFormula = (formula: string, row: any[]) => {
-    try {
-      // Replace column references (e.g., $1, $2) with actual values
-      const evaluatedFormula = formula.replace(/\$\d+/g, (match) => {
-        const columnIndex = parseInt(match.slice(1)) - 1;
-        return row[columnIndex]?.toString() || "0";
-      });
-      // Use Function constructor to safely evaluate the formula
-      return new Function(`return ${evaluatedFormula}`)();
-    } catch (err) {
-      return "Error";
-    }
-  };
 
   const addCustomColumn = () => {
     if (!newColumnName) {
       setError("Please provide a name for the custom column");
       return;
     }
-    setCustomColumns([
-      ...customColumns,
-      { name: newColumnName, formula: newColumnFormula },
-    ]);
+
+    if (!excelData) {
+      setError("No data loaded");
+      return;
+    }
+
+    // Create new column
+    const newColumn = { name: newColumnName };
+
+    // Create new rows with empty value for new column
+    const updatedRows = excelData.rows.map((row) => {
+      const newRow = Array.from(row); // Create a new array from the row
+      newRow.push(""); // Add empty string for new column
+      return newRow;
+    });
+
+    // Create new headers array
+    const updatedHeaders = [...excelData.headers, newColumn.name];
+
+    // Update state
+    setExcelData((prev) => {
+      if (!prev) return null;
+      return {
+        ...prev,
+        headers: updatedHeaders,
+        rows: updatedRows,
+        tableName: prev.tableName,
+      };
+    });
+
+    // Update UI state
+    setCustomColumns((prev) => [...prev, newColumn]);
     setNewColumnName("");
-    setNewColumnFormula("");
     setShowCustomColumnDialog(false);
     setError(null);
+
+    toast({
+      title: "Column Added",
+      description: `New column "${newColumnName}" has been added successfully`,
+      duration: 2000,
+      className: "bg-primary/20 border-primary/30 text-primary-foreground",
+    });
   };
 
-  const processedRows =
-    excelData?.rows.map((row) => {
-      const customValues = customColumns.map((col) =>
-        col.formula ? evaluateFormula(col.formula, row) : "",
-      );
-      return [...row, ...customValues];
-    }) || [];
-
-  const currentRows = processedRows.slice(
-    (currentPage - 1) * rowsPerPage,
-    currentPage * rowsPerPage,
-  );
+  const currentRows =
+    excelData?.rows.slice(
+      (currentPage - 1) * rowsPerPage,
+      currentPage * rowsPerPage,
+    ) || [];
 
   return (
     <div className="min-h-screen bg-background">
@@ -415,17 +430,111 @@ export default function ExcelViewer() {
         {excelData && hasHeaders === true && (
           <div className="space-y-4">
             <div className="flex justify-between items-center">
-              <Button onClick={() => setShowCustomColumnDialog(true)}>
-                Add Custom Column
-              </Button>
+              <div className="flex gap-2">
+                <Button onClick={() => setShowCustomColumnDialog(true)}>
+                  Add Custom Column
+                </Button>
+                <Dialog>
+                  <DialogTrigger asChild>
+                    <Button variant="secondary">Export to PDF</Button>
+                  </DialogTrigger>
+                  <DialogContent className="max-w-4xl w-full">
+                    <DialogHeader>
+                      <DialogTitle>PDF Preview</DialogTitle>
+                    </DialogHeader>
+                    <div className="h-[600px] w-full">
+                      <iframe
+                        className="w-full h-full border rounded"
+                        src={(() => {
+                          const doc = new jsPDF({
+                            orientation: "landscape",
+                            unit: "mm",
+                          });
+
+                          // Add header
+                          doc.setFontSize(16);
+                          doc.text(
+                            "Created By Excel Viewer",
+                            doc.internal.pageSize.getWidth() / 2,
+                            20,
+                            { align: "center" },
+                          );
+
+                          // Add the table
+                          doc.autoTable({
+                            head: [excelData.headers],
+                            body: excelData.rows,
+                            startY: 30,
+                            styles: { fontSize: 8 },
+                            didDrawPage: function (data) {
+                              // Footer with page numbers
+                              const str =
+                                "Page " + doc.internal.getNumberOfPages();
+                              doc.setFontSize(10);
+                              doc.text(
+                                str,
+                                doc.internal.pageSize.getWidth() / 2,
+                                doc.internal.pageSize.getHeight() - 10,
+                                { align: "center" },
+                              );
+                            },
+                          });
+
+                          return URL.createObjectURL(doc.output("blob"));
+                        })()}
+                      />
+                    </div>
+                    <div className="flex justify-end">
+                      <Button
+                        onClick={() => {
+                          const doc = new jsPDF({
+                            orientation: "landscape",
+                            unit: "mm",
+                          });
+
+                          // Add header
+                          doc.setFontSize(16);
+                          doc.text(
+                            "Created By Excel Viewer",
+                            doc.internal.pageSize.getWidth() / 2,
+                            20,
+                            { align: "center" },
+                          );
+
+                          // Add the table
+                          doc.autoTable({
+                            head: [excelData.headers],
+                            body: excelData.rows,
+                            startY: 30,
+                            styles: { fontSize: 8 },
+                            didDrawPage: function (data) {
+                              // Footer with page numbers
+                              const str =
+                                "Page " + doc.internal.getNumberOfPages();
+                              doc.setFontSize(10);
+                              doc.text(
+                                str,
+                                doc.internal.pageSize.getWidth() / 2,
+                                doc.internal.pageSize.getHeight() - 10,
+                                { align: "center" },
+                              );
+                            },
+                          });
+
+                          doc.save("excel-viewer-export.pdf");
+                        }}
+                      >
+                        Download PDF
+                      </Button>
+                    </div>
+                  </DialogContent>
+                </Dialog>
+              </div>
               {excelData && (
                 <DatabaseManager
                   data={{
-                    headers: [
-                      ...excelData.headers,
-                      ...customColumns.map((col) => col.name),
-                    ],
-                    rows: processedRows,
+                    headers: excelData.headers,
+                    rows: excelData.rows,
                   }}
                 />
               )}
@@ -448,64 +557,137 @@ export default function ExcelViewer() {
                       placeholder="Enter column name"
                     />
                   </div>
-                  <div className="space-y-2">
-                    <Label>Formula</Label>
-                    <Input
-                      value={newColumnFormula}
-                      onChange={(e) => setNewColumnFormula(e.target.value)}
-                      placeholder="e.g., $1 + $2 (use $n for nth column)"
-                    />
-                  </div>
+
                   <Button onClick={addCustomColumn}>Add Column</Button>
                 </div>
               </DialogContent>
             </Dialog>
 
-            <div className="rounded-lg border bg-card">
+            <div className="rounded-lg border bg-card overflow-hidden">
               <div className="overflow-x-auto">
-                <div className="min-w-max">
-                  <table className="w-full">
-                    <thead>
-                      <tr className="border-b bg-muted/10">
-                        {[
-                          ...excelData.headers,
-                          ...customColumns.map((col) => col.name),
-                        ].map((header, index) => (
-                          <th
-                            key={index}
-                            className="p-2 text-left text-muted-foreground font-medium sticky top-0 bg-card z-10"
-                          >
-                            {header}
-                          </th>
+                <table
+                  className="w-full table-fixed"
+                  style={{ minWidth: "max-content" }}
+                >
+                  <thead>
+                    <tr className="border-b bg-muted/10">
+                      {excelData.headers.map((header, index) => (
+                        <th
+                          key={index}
+                          className="p-2 text-left text-muted-foreground font-medium sticky top-0 bg-card z-10 group"
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <span>{header}</span>
+                            <AlertDialog>
+                              <AlertDialogTrigger asChild>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="opacity-0 group-hover:opacity-100 transition-opacity h-6 w-6"
+                                >
+                                  <svg
+                                    xmlns="http://www.w3.org/2000/svg"
+                                    viewBox="0 0 24 24"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    strokeWidth="2"
+                                    strokeLinecap="round"
+                                    strokeLinejoin="round"
+                                    className="h-4 w-4"
+                                  >
+                                    <path d="M3 6h18" />
+                                    <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" />
+                                    <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" />
+                                  </svg>
+                                </Button>
+                              </AlertDialogTrigger>
+                              <AlertDialogContent>
+                                <AlertDialogHeader>
+                                  <AlertDialogTitle>
+                                    Delete Column
+                                  </AlertDialogTitle>
+                                  <AlertDialogDescription>
+                                    Are you sure you want to delete the column "
+                                    {header}"? This action cannot be undone.
+                                  </AlertDialogDescription>
+                                </AlertDialogHeader>
+                                <AlertDialogFooter>
+                                  <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                  <AlertDialogAction
+                                    onClick={(e) => {
+                                      e.preventDefault();
+                                      if (!excelData) return;
+
+                                      // Remove the column from headers and all rows
+                                      const updatedHeaders =
+                                        excelData.headers.filter(
+                                          (_, i) => i !== index,
+                                        );
+                                      const updatedRows = excelData.rows.map(
+                                        (row) =>
+                                          row.filter((_, i) => i !== index),
+                                      );
+
+                                      setExcelData((prev) => ({
+                                        ...prev!,
+                                        headers: updatedHeaders,
+                                        rows: updatedRows,
+                                      }));
+
+                                      toast({
+                                        title: "Column Deleted",
+                                        description: `Column "${header}" has been deleted successfully`,
+                                        duration: 2000,
+                                        className:
+                                          "bg-destructive/20 border-destructive/30 text-destructive-foreground",
+                                      });
+
+                                      // Close the dialog
+                                      const closeButton =
+                                        document.querySelector(
+                                          '[role="alertdialog"] button[type="button"]',
+                                        );
+                                      if (closeButton instanceof HTMLElement) {
+                                        closeButton.click();
+                                      }
+                                    }}
+                                    className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                                  >
+                                    Delete
+                                  </AlertDialogAction>
+                                </AlertDialogFooter>
+                              </AlertDialogContent>
+                            </AlertDialog>
+                          </div>
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {currentRows.map((row, rowIndex) => (
+                      <tr
+                        key={rowIndex}
+                        className="border-b hover:bg-muted/5 transition-colors"
+                      >
+                        {row.map((cell: any, cellIndex: number) => (
+                          <td key={cellIndex} className="p-2">
+                            <Input
+                              value={cell || ""}
+                              onChange={(e) =>
+                                handleCellEdit(
+                                  (currentPage - 1) * rowsPerPage + rowIndex,
+                                  cellIndex,
+                                  e.target.value,
+                                )
+                              }
+                              className="border-none focus:ring-1"
+                            />
+                          </td>
                         ))}
                       </tr>
-                    </thead>
-                    <tbody>
-                      {currentRows?.map((row, rowIndex) => (
-                        <tr
-                          key={rowIndex}
-                          className="border-b hover:bg-muted/5 transition-colors"
-                        >
-                          {row.map((cell: any, cellIndex: number) => (
-                            <td key={cellIndex} className="p-2">
-                              <Input
-                                value={cell || ""}
-                                onChange={(e) =>
-                                  handleCellEdit(
-                                    (currentPage - 1) * rowsPerPage + rowIndex,
-                                    cellIndex,
-                                    e.target.value,
-                                  )
-                                }
-                                className="border-none focus:ring-1"
-                              />
-                            </td>
-                          ))}
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+                    ))}
+                  </tbody>
+                </table>
               </div>
             </div>
 
