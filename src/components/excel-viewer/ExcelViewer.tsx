@@ -5,6 +5,7 @@ import "jspdf-autotable";
 import initSqlJs from "sql.js";
 import { Button } from "@/components/ui/button";
 import { DatabaseIcon } from "lucide-react";
+import { ThemeToggle } from "@/components/theme-toggle";
 import DatabaseManager from "./DatabaseManager";
 import {
   Dialog,
@@ -274,9 +275,10 @@ export default function ExcelViewer() {
     <div className="min-h-screen bg-background">
       <div className="bg-card py-12 border-b">
         <div className="container mx-auto px-4">
-          <h1 className="text-4xl font-bold tracking-tight mb-4">
-            Excel Viewer
-          </h1>
+          <div className="flex justify-between items-center mb-4">
+            <h1 className="text-4xl font-bold tracking-tight">Excel Viewer</h1>
+            <ThemeToggle />
+          </div>
           {excelData?.tableName && (
             <div className="flex items-center gap-2 mb-2">
               <DatabaseIcon className="h-5 w-5 text-primary" />
