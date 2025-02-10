@@ -1,12 +1,16 @@
 import { Button } from "@/components/ui/button";
 import { FileSpreadsheet } from "lucide-react";
 import { useNavigate } from "react-router-dom";
+import { ThemeToggle } from "./theme-toggle";
 
 export default function LandingPage() {
   const navigate = useNavigate();
 
   return (
     <div className="min-h-screen bg-background">
+      <div className="container mx-auto px-4 py-4 flex justify-end">
+        <ThemeToggle />
+      </div>
       <div className="container mx-auto px-4 py-24 flex flex-col items-center text-center space-y-8">
         <div className="space-y-4 max-w-3xl">
           <h1 className="text-4xl font-bold tracking-tighter sm:text-5xl md:text-6xl lg:text-7xl">
