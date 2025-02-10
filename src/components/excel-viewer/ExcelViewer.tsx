@@ -6,6 +6,7 @@ import initSqlJs from "sql.js";
 import { Button } from "@/components/ui/button";
 import { DatabaseIcon } from "lucide-react";
 import { ThemeToggle } from "@/components/theme-toggle";
+import HelpOverlay from "@/components/help-overlay";
 import DatabaseManager from "./DatabaseManager";
 import {
   Dialog,
@@ -719,6 +720,7 @@ export default function ExcelViewer() {
           </div>
         )}
       </div>
+      <HelpOverlay />
     </div>
   );
 }

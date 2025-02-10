@@ -10,6 +10,9 @@ function App() {
     <Suspense fallback={<p>Loading...</p>}>
       <>
         <Routes>
+          {import.meta.env.VITE_TEMPO === "true" && (
+            <Route path="/tempobook/*" />
+          )}
           <Route path="/" element={<LandingPage />} />
           <Route path="/viewer" element={<Home />} />
         </Routes>
