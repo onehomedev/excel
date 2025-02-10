@@ -49,10 +49,9 @@ export default function ExcelViewer() {
   const [currentPage, setCurrentPage] = useState(1);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
-  const [customColumns, setCustomColumns] = useState<CustomColumn[]>([]);
-  const [showCustomColumnDialog, setShowCustomColumnDialog] = useState(false);
-  const [newColumnName, setNewColumnName] = useState("");
 
+  const [isLoading, setIsLoading] = useState(false);
+  const [loadingProgress, setLoadingProgress] = useState(0);
   const [SQL, setSQL] = useState<any>(null);
 
   useEffect(() => {
@@ -83,10 +82,25 @@ export default function ExcelViewer() {
   ) => {
     setExcelData((prev) => {
       if (!prev) return null;
-      const newRows = [...prev.rows];
-      newRows[rowIndex] = [...newRows[rowIndex]];
+      const newRows = prev.rows.map((row) => [...row]); // Create deep copy of all rows
+
+      // Ensure the row exists and has the right number of columns
+      if (!newRows[rowIndex]) {
+        newRows[rowIndex] = new Array(prev.headers.length).fill("");
+      } else if (newRows[rowIndex].length < prev.headers.length) {
+        // Fill any missing columns with empty strings
+        while (newRows[rowIndex].length < prev.headers.length) {
+          newRows[rowIndex].push("");
+        }
+      }
+
+      // Update the cell value
       newRows[rowIndex][colIndex] = value;
-      return { ...prev, rows: newRows };
+
+      return {
+        ...prev,
+        rows: newRows,
+      };
     });
   };
 
@@ -151,35 +165,80 @@ export default function ExcelViewer() {
     }
   };
 
-  const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+  const MAX_FILE_SIZE = 100 * 1024; // 100KB in bytes
+
+  const handleFileUpload = async (
+    event: React.ChangeEvent<HTMLInputElement>,
+  ) => {
     const file = event.target.files?.[0];
     if (!file) return;
 
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      try {
-        const data = new Uint8Array(e.target?.result as ArrayBuffer);
-        const workbook = XLSX.read(data, { type: "array" });
-        const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
-        const jsonData = XLSX.utils.sheet_to_json(firstSheet, { header: 1 });
+    if (file.size > MAX_FILE_SIZE) {
+      toast({
+        variant: "destructive",
+        title: "File too large",
+        description: `File size must be less than 100KB. Current file size: ${(file.size / 1024).toFixed(2)}KB`,
+      });
+      return;
+    }
 
-        if (jsonData.length === 0) {
-          setError("The uploaded file is empty");
-          return;
-        }
+    setIsLoading(true);
+    setLoadingProgress(0);
 
-        setExcelData({
-          headers: [],
-          rows: jsonData as any[][],
-        });
-        setHasHeaders(null); // Prompt user for headers
-      } catch (err) {
-        setError(
-          "Error reading file. Please make sure it's a valid Excel file.",
+    try {
+      // Use chunks for large files
+      const CHUNK_SIZE = 1024 * 1024; // 1MB chunks
+      const fileSize = file.size;
+      const chunks = Math.ceil(fileSize / CHUNK_SIZE);
+      const arrayBuffer = new ArrayBuffer(fileSize);
+      const uint8Array = new Uint8Array(arrayBuffer);
+
+      for (let i = 0; i < chunks; i++) {
+        const start = i * CHUNK_SIZE;
+        const end = Math.min(start + CHUNK_SIZE, fileSize);
+        const chunk = file.slice(start, end);
+
+        const chunkArrayBuffer = await new Promise<ArrayBuffer>(
+          (resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = (e) => resolve(e.target?.result as ArrayBuffer);
+            reader.onerror = reject;
+            reader.readAsArrayBuffer(chunk);
+          },
         );
+
+        uint8Array.set(new Uint8Array(chunkArrayBuffer), start);
+        setLoadingProgress(Math.round((end / fileSize) * 100));
       }
-    };
-    reader.readAsArrayBuffer(file);
+
+      const workbook = XLSX.read(arrayBuffer, { type: "array" });
+      const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+      const jsonData = XLSX.utils.sheet_to_json(firstSheet, { header: 1 });
+
+      if (jsonData.length === 0) {
+        toast({
+          variant: "destructive",
+          title: "Empty file",
+          description: "The uploaded file is empty",
+        });
+        return;
+      }
+
+      setExcelData({
+        headers: [],
+        rows: jsonData as any[][],
+      });
+      setHasHeaders(null); // Prompt user for headers
+    } catch (err) {
+      toast({
+        variant: "destructive",
+        title: "Error reading file",
+        description: "Please make sure it's a valid Excel file.",
+      });
+    } finally {
+      setIsLoading(false);
+      setLoadingProgress(0);
+    }
   };
 
   const handleHeadersConfirmation = (hasHeaders: boolean) => {
@@ -315,6 +374,24 @@ export default function ExcelViewer() {
         </div>
       </div>
       <div className="container mx-auto px-4 py-8 space-y-8">
+        <Dialog open={isLoading} onOpenChange={() => {}}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Loading File</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-4">
+              <div className="h-2 w-full bg-secondary rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-primary transition-all duration-300"
+                  style={{ width: `${loadingProgress}%` }}
+                />
+              </div>
+              <p className="text-center text-sm text-muted-foreground">
+                {loadingProgress}% Complete
+              </p>
+            </div>
+          </DialogContent>
+        </Dialog>
         <div
           className="border-2 border-dashed border-muted rounded-lg p-8 text-center hover:border-primary cursor-pointer transition-colors max-w-sm bg-muted/5"
           onDragOver={(e) => {
@@ -325,6 +402,17 @@ export default function ExcelViewer() {
             e.preventDefault();
             e.stopPropagation();
             const file = e.dataTransfer.files[0];
+            if (!file) return;
+
+            if (file.size > MAX_FILE_SIZE) {
+              toast({
+                variant: "destructive",
+                title: "File too large",
+                description: `File size must be less than 100KB. Current file size: ${(file.size / 1024).toFixed(2)}KB`,
+              });
+              return;
+            }
+
             if (
               file &&
               (file.name.endsWith(".xlsx") || file.name.endsWith(".xls"))
@@ -334,7 +422,11 @@ export default function ExcelViewer() {
               } as React.ChangeEvent<HTMLInputElement>;
               handleFileUpload(event);
             } else {
-              setError("Please upload an Excel file (.xlsx or .xls)");
+              toast({
+                variant: "destructive",
+                title: "Invalid file type",
+                description: "Please upload an Excel file (.xlsx or .xls)",
+              });
             }
           }}
           onClick={() => {
@@ -349,14 +441,11 @@ export default function ExcelViewer() {
           <div className="space-y-2">
             <p>Drag and drop your Excel file here</p>
             <p className="text-sm text-muted-foreground">or click to browse</p>
+            <p className="text-xs text-muted-foreground">
+              Maximum file size: 100KB
+            </p>
           </div>
         </div>
-
-        {error && (
-          <Alert variant="destructive">
-            <AlertDescription>{error}</AlertDescription>
-          </Alert>
-        )}
 
         {success && (
           <Alert>
@@ -410,12 +499,11 @@ export default function ExcelViewer() {
           <div className="space-y-4">
             <div className="flex justify-between items-center">
               <div className="flex gap-2">
-                <Button onClick={() => setShowCustomColumnDialog(true)}>
-                  Add Custom Column
-                </Button>
                 <Dialog>
                   <DialogTrigger asChild>
-                    <Button variant="secondary">Export to PDF</Button>
+                    <Button className="bg-primary text-primary-foreground hover:bg-primary/90">
+                      Export to PDF
+                    </Button>
                   </DialogTrigger>
                   <DialogContent className="max-w-4xl w-full">
                     <DialogHeader>
@@ -510,29 +598,6 @@ export default function ExcelViewer() {
                 </Dialog>
               </div>
             </div>
-
-            <Dialog
-              open={showCustomColumnDialog}
-              onOpenChange={setShowCustomColumnDialog}
-            >
-              <DialogContent>
-                <DialogHeader>
-                  <DialogTitle>Add Custom Column</DialogTitle>
-                </DialogHeader>
-                <div className="space-y-4">
-                  <div className="space-y-2">
-                    <Label>Column Name</Label>
-                    <Input
-                      value={newColumnName}
-                      onChange={(e) => setNewColumnName(e.target.value)}
-                      placeholder="Enter column name"
-                    />
-                  </div>
-
-                  <Button onClick={addCustomColumn}>Add Column</Button>
-                </div>
-              </DialogContent>
-            </Dialog>
 
             <div className="rounded-lg border bg-card overflow-hidden">
               <div className="overflow-x-auto">
@@ -643,7 +708,9 @@ export default function ExcelViewer() {
                         {row.map((cell: any, cellIndex: number) => (
                           <td key={cellIndex} className="p-2">
                             <Input
-                              value={cell || ""}
+                              value={
+                                cell === null || cell === undefined ? "" : cell
+                              }
                               onChange={(e) =>
                                 handleCellEdit(
                                   (currentPage - 1) * rowsPerPage + rowIndex,
@@ -651,6 +718,7 @@ export default function ExcelViewer() {
                                   e.target.value,
                                 )
                               }
+                              placeholder="Enter value..."
                               className="border-none focus:ring-1"
                             />
                           </td>
