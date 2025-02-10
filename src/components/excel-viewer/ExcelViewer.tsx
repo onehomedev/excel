@@ -274,68 +274,44 @@ export default function ExcelViewer() {
 
   return (
     <div className="min-h-screen bg-background">
-      <div className="bg-card py-12 border-b">
+      <div className="bg-card border-b">
         <div className="container mx-auto px-4">
-          <div className="flex justify-between items-center mb-4">
-            <h1 className="text-4xl font-bold tracking-tight">Excel Viewer</h1>
+          <div className="h-16 flex items-center justify-between">
+            <div className="flex items-center gap-4">
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => (window.location.href = "/")}
+                className="hover:bg-muted"
+              >
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  width="24"
+                  height="24"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  className="h-6 w-6"
+                >
+                  <path d="m12 19-7-7 7-7" />
+                  <path d="M19 12H5" />
+                </svg>
+              </Button>
+              <h1 className="text-xl font-semibold">Excel Viewer</h1>
+            </div>
             <ThemeToggle />
           </div>
-          {excelData?.tableName && (
-            <div className="flex items-center gap-2 mb-2">
-              <DatabaseIcon className="h-5 w-5 text-primary" />
-              <p className="text-lg font-medium">
-                Current Database:{" "}
-                <span className="text-primary">{excelData.tableName}</span>
-              </p>
-            </div>
-          )}
+        </div>
+      </div>
+      <div className="bg-card py-12 border-b">
+        <div className="container mx-auto px-4">
           <p className="text-lg text-muted-foreground mb-8">
             Upload Excel files or load from database to view and analyze your
             data.
           </p>
-          <div className="flex gap-4">
-            <Dialog>
-              <DialogTrigger asChild>
-                <Button variant="secondary" className="gap-2">
-                  <DatabaseIcon className="h-4 w-4" />
-                  Load from Database
-                </Button>
-              </DialogTrigger>
-              <DialogContent>
-                <DialogHeader>
-                  <DialogTitle>Load from Database</DialogTitle>
-                </DialogHeader>
-                <DatabaseManager
-                  onLoadTable={(headers, rows, tableName) => {
-                    loadTableData(headers, rows, tableName);
-                    toast({
-                      title: "Success",
-                      description: "Table loaded successfully",
-                    });
-                    const closeEvent = new MouseEvent("click", {
-                      bubbles: true,
-                      cancelable: true,
-                      view: window,
-                    });
-                    document
-                      .querySelector("[data-radix-focus-guard]")
-                      ?.parentElement?.querySelector('button[type="button"]')
-                      ?.dispatchEvent(closeEvent);
-                  }}
-                />
-              </DialogContent>
-            </Dialog>
-            {excelData?.tableName && (
-              <Button
-                onClick={saveChangesToDatabase}
-                variant="secondary"
-                className="gap-2"
-              >
-                <DatabaseIcon className="h-4 w-4" />
-                Save Changes
-              </Button>
-            )}
-          </div>
         </div>
       </div>
       <div className="container mx-auto px-4 py-8 space-y-8">
@@ -533,14 +509,6 @@ export default function ExcelViewer() {
                   </DialogContent>
                 </Dialog>
               </div>
-              {excelData && (
-                <DatabaseManager
-                  data={{
-                    headers: excelData.headers,
-                    rows: excelData.rows,
-                  }}
-                />
-              )}
             </div>
 
             <Dialog
