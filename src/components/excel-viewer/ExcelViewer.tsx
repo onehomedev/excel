@@ -340,7 +340,7 @@ export default function ExcelViewer() {
               <Button
                 variant="ghost"
                 size="icon"
-                onClick={() => (window.location.href = "/")}
+                onClick={() => window.history.back()}
                 className="hover:bg-muted"
               >
                 <svg
